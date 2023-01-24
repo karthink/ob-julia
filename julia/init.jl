@@ -109,8 +109,13 @@ end
 """ob-julia entry point.  Run the code contained in `src-file`,
 wrapped in a block where variables defined in `vars-file` are set.
 The output is written to `output_file`, according to config
-options defined in `params`."""
-function OrgBabelEval(src_file, output_file, params, async_uuid=nothing)
+options defined in `params`.
+
+If `print_output` is true (default), print the `async_uuid` instead of returning
+it. If `automime` is true, change the extension of the `output_file`
+heuristically to a better suited one."""
+function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
+                      print_output=true, automime=false)
     "Return a temporary file in the same dir as `output`.
      Create the dir if it does not exists."
     function safe_mktemp(output)
@@ -165,7 +170,12 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing)
         write(output_file, take!(io))
     end
     if async_uuid !== nothing
-        println("ob_julia_async_$(async_uuid)")
+        if print_output
+            println("ob_julia_async_$(async_uuid)")
+            println("$(mime)")
+        else
+            return "(\"ob_julia_async_$(async_uuid)\" . \"$(mime)\")"
+        end
     end
 end
 
