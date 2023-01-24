@@ -7,7 +7,7 @@
 ;; Version: 1.0.0
 ;; Keywords: languages
 ;; URL: https://github.com/nico202/ob-julia
-;; Package-Requires: ((ess "20201004.1522") (julia-mode "0.4"))
+;; Package-Requires: ((julia-mode "0.4"))
 
 ;; This file is *not* part of GNU Emacs.
 
