@@ -67,7 +67,7 @@ If an exception is thrown, the outcome is false and the trace is
 returned.  Directory during evaluation is chanded `dir', which
 defaults to the current directory.  The output will be printed to a
 display with mime type `mime'."""
-function org_eval(src, output_stream, dir=pwd(), mime=MIMES[""])
+function org_eval(src, output_stream, dir=pwd()) #, mime=MIMES[""])
     # Meta.parse parses only one expression, so we wrap the code in a
     # block.  It can either be a let block or a begin block.
     return cd(expanduser(dir)) do
@@ -94,16 +94,38 @@ function org_eval(src, output_stream, dir=pwd(), mime=MIMES[""])
     end
 end
 
-"""Determine the output MIME type based on filename.  Fallback to
-`fallback`."""
-function output_mime(filename; fallback="")
+"""Determine the output MIME type based on file contents or filename. Fallback
+to `fallback`."""
+function output_mime(filename, result; fallback="")
     # ext might either be an empty string or an extension with a "."
     # prefix
     ext = splitext(filename)[end]
     # Remove the prefix if present, and return the correct mimetype.
     # If the the desired extension is not present in our MIMES dict,
     # fallback.
-    get(MIMES, isempty(ext) ? fallback : ext[2:end], MIMES[fallback])
+    mime = auto_determine_mime(result)
+    if mime == nothing
+        get(MIMES, isempty(ext) ? fallback : ext[2:end], MIMES[fallback])
+    else
+        mime
+    end
+end
+
+function auto_determine_mime(result)
+    for pkg in keys(package_mimes)
+        if isdefined(Main, pkg) && (isa(getfield(Main, pkg), Module) ||
+            isa(getfield(Main, pkg), UnionAll))
+            showable_mime_type =
+                iterate(Iterators.filter(m -> showable(m, result),
+                                         package_mimes[pkg]))
+            mime_type =
+                if (showable_mime_type == nothing) nothing
+                else showable_mime_type[1] end
+            if mime_type != nothing
+                return mime_type
+            end
+        end
+    end
 end
 
 """ob-julia entry point.  Run the code contained in `src-file`,
@@ -128,7 +150,6 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
     temporary_output, temporary_stream = safe_mktemp(output_file)
     # Parse the params (named tuple passed by ob-julia)
     params = Main.eval(Meta.parse(params))
-    mime = output_mime(output_file)
     latexify = something(params[:latexify], "nil") != "nil"
     # If results is output, running the code will start writing data
     # directly on the output file.  That's ok, but we need to tell
@@ -138,7 +159,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
     if result_is_output(params)
         println(temporary_stream, "raw")
     end
-    success, result = org_eval(src_file, temporary_stream, working_dir(params), mime)
+    success, result = org_eval(src_file, temporary_stream, working_dir(params))
     # Now the code has been executed and imports have been imported.
     # We can reload supported display function so maybe one of them will be used
     OrgBabelReload()
@@ -163,6 +184,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
         # Since display function might get re-defined during the
         # execution of this function (because of OrgBabelReload) we
         # want to be sure to call the latest version
+        mime = output_mime(output_file, result)
         Base.invokelatest(display, ObJuliaDisplay(io),
                           if mime == MIME("text/org") && latexify
                               MIME("text/org+latexify")

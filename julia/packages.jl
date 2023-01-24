@@ -14,6 +14,21 @@ const supported_packages = [
     :Latexify, :LaTeXStrings,
     :Gadfly, :Plots]
 
+const package_mimes =
+    Dict(:Plots => MIME.(["image/gif",
+                    "image/png",
+                    "image/svg+xml",
+                    "application/pdf",
+                    "application/postscript",
+                    "image/eps",
+                    "application/x-tex",
+                    "text/html"]),
+         :GadFly => MIME.(["application/postscript",
+                     "application/pdf",
+                     "image/png",
+                     "image/svg+xml"]))
+
+
 "Call define_\$pkg function."
 define_package_functions(pkg::Symbol) = (@eval $pkg)()
 
@@ -122,7 +137,7 @@ end
 function define_Plots()
     @eval display(d::ObJuliaDisplay, mime::M, p::Main.Plots.Plot; kwargs...) where
     { M <: Union{MIME"image/png", MIME"image/svg+xml", MIME"application/pdf", MIME"application/postscript",
-                 MIME"image/eps", MIME"application/x-tex", MIME"text/html"}}=
+                 MIME"image/eps", MIME"application/x-tex", MIME"text/html", MIME"image/gif"}}=
                      show(d.io, mime, p)
     @eval display(d::ObJuliaDisplay, mime::MIME"text/org", p::Main.Plots.Plot; kwargs...) =
         (verbatim(d); show(d.io, MIME("text/plain"), p))
