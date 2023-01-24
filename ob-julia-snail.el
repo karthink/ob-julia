@@ -1,15 +1,44 @@
 (require 'ob-julia)
 (require 'julia-snail)
 
+(cl-defmethod org-babel-julia-prepare-format-call
+    ((_ (eql 'julia-snail)) src-file out-file params &optional uuid)
+  "Format a call to OrgBabelEval
+
+OrgBabelEval is the entry point of the Julia code defined in
+the startup script."
+  (format
+   ;; "Main.JuilaSnail.Extensions.ObJulia.OrgBabelEval(%S,%S,%S,%s;print_output=false);"
+   "ObJulia.OrgBabelEval(%S,%S,%S,%s;print_output=false);"
+   src-file out-file (org-babel-julia-params->named-tuple params)
+   (or (when uuid (format "%S" uuid)) "nothing")))
+
 (cl-defmethod org-babel-julia-prep-session ((_ (eql 'julia-snail)) session params)
   "Prepare SESSION according to the header arguments specified in PARAMS."
-  ;; TODO
-  )
+  (let ((dir (or (alist-get :dir params)
+		 default-directory))
+        (julia-snail-repl-buffer
+         (cond ((bufferp session) (buffer-name session))
+               ((stringp session) session)
+               (t (buffer-name)))))
+    (save-window-excursion
+      (julia-snail)
+      (message "Loading ObJulia...")
+      (julia-snail--send-to-server
+        ;; '("JuliaSnail" "Extensions")
+        '("Main")
+        (format "include(\"%s\")" ob-julia-startup-script)
+        :repl-buf julia-snail-repl-buffer
+        :async nil)
+      (message "Loading ObJulia... done")
+      julia-snail-repl-buffer)))
 
 (cl-defmethod org-babel-julia-session-live-p
   (session &context (org-babel-julia-backend (eql 'julia-snail)))
-  ;; TODO
-  )
+  (and-let*
+      ((repl-buffer (get-buffer julia-snail-repl-buffer)) 
+       ((buffer-live-p repl-buffer))
+       ((buffer-local-value 'julia-snail-repl-mode repl-buffer)))))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:sync
   ((_ (eql 'julia-snail)) session body block output)
@@ -18,9 +47,41 @@
   )
 
 (cl-defmethod org-babel-julia-evaluate-in-session:async
-    (backend session uuid body block output properties)
+  ((_ (eql 'julia-snail)) session uuid body block output properties)
   "Run BODY in session SESSION asynchronously with julia-snail."
-  ;; TODO
+  (let ((reqid 
+         (julia-snail--send-to-server
+           '("Main") ;TODO: Use `julia-snail--module-at-point'
+           body
+           :async t
+           :display-error-buffer-on-failure? t
+           :callback-success #'org-babel-julia-snail-success-callback))))
+  (org-babel-julia--async-add uuid properties)
   (concat "julia-async:" uuid))
+
+(defun org-babel-julia-snail-success-callback (request-info result-data)
+  "A function that is called when julia-snail response is available."
+  (pcase-let ((`(,uuid-string . ,mime-type) (read result-data)))
+    (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" uuid-string)
+        (let* ((uuid (match-string-no-properties 1 uuid-string))
+               (org-buffer (julia-snail--request-tracker-originating-buf request-info))
+               (display-errors (julia-snail--request-tracker-display-error-buffer-on-failure?
+                                request-info))
+               (properties (org-babel-julia--async-get-remove uuid))
+               (vals (cdr properties))
+               ;; (org-buffer (elt vals 2))
+               (params (elt vals 0))
+               (output-file (elt vals 1)))
+          ;; ObJulia can pick a mime-type better suited to the type of result
+          ;; generated - for instance, png when writing a GR plot object. We
+          ;; rename the output file to a more suitable extension in this case.
+          (when-let* ((required-ext (alist-get mime-type org-babel-julia-mimes->exts
+                                               nil nil #'equal))
+                      (new-output-file (concat (file-name-sans-extension output-file)
+                                               "." required-ext)))
+            (unless (string= (file-name-extension output-file) required-ext)
+              (rename-file output-file new-output-file)
+              (setq output-file new-output-file)))
+          (org-babel-julia--place-result output-file org-buffer uuid params)))))
 
 (provide 'ob-julia-snail)
