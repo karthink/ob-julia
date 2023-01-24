@@ -17,6 +17,8 @@
 
 ;; ** Required packages:
 (require 'ob)
+(require 'subr-x)
+(require 'cl)
 (require 'cl-generic)
 
 ;; ** User options
@@ -76,6 +78,20 @@ automatically."
 			    (output value))))
   "Julia-specific header arguments.")
 
+(defconst org-babel-julia-mimes->exts
+  '(("text/org"  . "org")
+   ("text/csv"  . "csv")
+   ("image/eps"  . "eps")
+   ("text/html" . "html")
+   ("text/org"  . "org")
+   ("application/pdf"  . "pdf")
+   ("image/png"  . "png")
+   ("application/postscript" . "ps")
+   ("image/svg+xml"  . "svg")
+   ("application/x-tex"  . "tex"))
+  "Alist of extensions to mimetypes used by Julia when writing to
+  files.")
+
 ;; Set default extension to tangle Julia code:
 (add-to-list 'org-babel-tangle-lang-exts '("julia" . "jl"))
 
@@ -121,7 +137,8 @@ equivalents."
 (defvar org-babel-julia--async-map '()
   "Association list between async block uuids and its requried info (evaluation params, buffer).")
 
-(defun org-babel-julia-prepare-format-call (src-file out-file params &optional uuid)
+(cl-defgeneric org-babel-julia-prepare-format-call
+    (_backend src-file out-file params &optional uuid)
   "Format a call to OrgBabelEval
 
 OrgBabelEval is the entry point of the Julia code defined in
@@ -180,6 +197,13 @@ properties PROPERTIES."
      (ob-julia--trace-file output-file) (when async -1)))
   (org-babel-julia-process-results params output-file))
 
+(defun org-babel-edit-prep:julia (info)
+  (let ((session (cdr (assq :session (nth 2 info)))))
+    (when (and session
+	       (string-prefix-p "*"  session)
+	       (string-suffix-p "*" session))
+      (org-babel-julia-initiate-session session nil))))
+
 (defun org-babel-expand-body:julia (body params)
   "Expand BODY according to PARAMS.  Return the expanded body, a
   string containing the julia we need to evaluate, possibly
@@ -228,7 +252,7 @@ table. To force a matrix, use matrix"
      ((member "verbatim" results) 'verbatim)
      (t 'auto))))
 
-(defun org-babel-julia-parse-result-format (params)
+(defun org-babel-julia-parse-output-extension (params)
   (let* ((results (alist-get :results params))
 	 (results (if (stringp results) (split-string results) nil)))
     (cond
@@ -239,7 +263,7 @@ table. To force a matrix, use matrix"
      (t "org"))))
 
 (defun org-babel-julia-process-results (params output-file)
-  "Decides what to insert as result.  If trace is true, add a drawer."
+  "Decides what to insert as result."
   (let ((result-type (org-babel-julia-parse-result-type params))
         (file (alist-get :file params))
         (res (alist-get :results params)))
@@ -248,29 +272,35 @@ table. To force a matrix, use matrix"
         (condition-case err
             (progn
               (insert-file-contents output-file)
-              (delete-file output-file)
-              (let* ((content (split-string
-                               (buffer-substring-no-properties
-                                (point-min) (point-max)) "\n"))
-                     (suggested-type (intern (car content)))
-                     (result (mapconcat 'concat (cdr content) "\n"))
-                     ;; Either enforce the result-type requested by the
-                     ;; user, or use the one provided by julia if 'auto
-                     (result-type (if (eq result-type 'auto)
-                                      suggested-type
-                                    result-type)))
-                ;; Dispatch processing of result based on result-type
-                (pcase result-type
-                  ;; ('table
-                  ;;  ;; Add hline
-                  ;;  (let ((res (car (read-from-string result))))
-                  ;;    `(,(car res) hline ,(cdr res))))
-                  ('table (car (read-from-string result)))
-                  ('matrix (car (read-from-string result)))
-                  ('list (car (read-from-string result)))
-                  ('verbatim result)
-                  ('raw result)
-                  (_ result))))
+              (if (eq buffer-file-coding-system 'no-conversion)
+                  ;; Must be an image, force :file
+                  (prog1 output-file
+                    (setf (alist-get :file params) output-file)
+                    (push "file" (alist-get :result-params params)))
+                ;; Else format result for display
+                (delete-file output-file)
+                (let* ((content (split-string
+                                 (buffer-substring-no-properties
+                                  (point-min) (point-max)) "\n"))
+                       (suggested-type (intern (car content)))
+                       (result (mapconcat 'concat (cdr content) "\n"))
+                       ;; Either enforce the result-type requested by the
+                       ;; user, or use the one provided by julia if 'auto
+                       (result-type (if (eq result-type 'auto)
+                                        suggested-type
+                                      result-type)))
+                  ;; Dispatch processing of result based on result-type
+                  (pcase result-type
+                    ;; ('table
+                    ;;  ;; Add hline
+                    ;;  (let ((res (car (read-from-string result))))
+                    ;;    `(,(car res) hline ,(cdr res))))
+                    ('table (car (read-from-string result)))
+                    ('matrix (car (read-from-string result)))
+                    ('list (car (read-from-string result)))
+                    ('verbatim result)
+                    ('raw result)
+                    (_ result)))))
           (error
            (display-warning 'org-babel
         		    (format "Error reading results: %S" err)
@@ -310,8 +340,8 @@ the environment name, i.e. \\begin{environment*}."
                    t)))
     (funcall orig-fn result result-params info hash lang)))
 
-(when ob-julia-insert-latex-environment-advice
-  (advice-add 'org-babel-insert-result :around #'ob-julia-latexify-make-raw))
+;; (when ob-julia-insert-latex-environment-advice
+;;   (advice-add 'org-babel-insert-result :around #'ob-julia-latexify-make-raw))
 
 (defun org-babel-julia-assign-to-var (name value)
   "Assign VALUE to a variable called NAME."
@@ -414,6 +444,27 @@ If session should not be used, return nil.
     (when name
       (maybe-earmuff-session-name name))))
 
+(defun org-babel-julia--place-result (output-file org-buffer uuid params)
+  "Place org-babel result in OUTPUT-FILE in ORG-BUFFER.
+
+PARAMS are the parameters of evaluation and UUID identifies the
+source block."
+  (save-window-excursion
+    (switch-to-buffer org-buffer)
+    (save-excursion
+      (save-restriction
+      	;; If it's narrowed, substitution would fail
+        (widen)
+      	;; search the matching src block
+      	(goto-char (point-max))
+      	(when (search-backward (concat "julia-async:" uuid) nil t)
+      	  ;; remove results
+      	  (search-backward "#+end_src")
+      	  ;; insert new one
+          (org-babel-insert-result
+           (ob-julia-dispatch-output-type params output-file t)
+           (alist-get :result-params params) nil nil "julia"))))))
+
 ;; ** Functions involving the backend: filtering output, sending input etc
 
 (defun org-julia-async-process-filter (process output &optional fallback)
@@ -432,24 +483,7 @@ If session should not be used, return nil.
              (org-buffer (elt vals 2)))
         ;; In the meanwhile, the user can change point and buffer, we
         ;; need to jump to where we started without disturbing.
-        (save-window-excursion
-          (switch-to-buffer org-buffer)
-          (save-excursion
-            (save-restriction
-      	      ;; If it's narrowed, substitution would fail
-      	      (widen)
-      	      ;; search the matching src block
-      	      (goto-char (point-max))
-      	      (when (search-backward (concat "julia-async:" uuid) nil t)
-      	        ;; remove results
-      	        (search-backward "#+end_src")
-      	        ;; insert new one
-      	        (org-babel-insert-result
-                 (ob-julia-dispatch-output-type params output-file t)
-                 (alist-get :result-params params) nil nil "julia")
-                ;; Pop up the stacktrace buffer if needed
-                (when (ob-julia--has-stacktrace output-file)
-                  (pop-to-buffer (ob-julia--get-create-trace-buffer)))))))
+        (org-babel-julia--place-result output-file org-buffer uuid params)
         (when fallback
           (inferior-ess-output-filter process "\n")))
     (when fallback
@@ -502,12 +536,20 @@ Please submit a bug report!")
         (concat "julia-async:" async)
       (ob-julia-dispatch-output-type params output-file))))
 
+(defun org-babel-julia-initiate-session (session params &optional backend)
+  "If there is not a current julia process then create one."
+  (if (org-babel-julia-session-live-p session)
+      session
+    (unless (string= session "none")
+      (org-babel-julia-prep-session (or backend org-babel-julia-backend)
+                                    session params))))
+
 (defun org-babel-prep-session:julia (session params &optional backend)
   "Prepare SESSION according to the header arguments specified in PARAMS.
 
 Dispatch on the value of BACKEND or `org-babel-julia-backend'."
   (org-babel-julia-prep-session (or backend org-babel-julia-backend)
-                           block params))
+                           session params))
 
 (cl-defgeneric org-babel-julia-session-live-p (session)
   nil)
@@ -529,7 +571,7 @@ Dispatch on BACKEND or `org-babel-julia-backend'."
   nil)
 
 (defun org-babel-julia-evaluate-in-session
-  (session block OrgBabelEval-call uuid params output-file org-buffer)
+  (backend session block OrgBabelEval-call uuid params output-file org-buffer)
   "Evaluate BLOCK in session SESSION, starting it if necessary.
 If UUID is provided, run the block asynchronously."
   ;; If the session does not exists, start it
@@ -537,7 +579,7 @@ If UUID is provided, run the block asynchronously."
     (org-babel-prep-session:julia session params))
   (if uuid
       (org-babel-julia-evaluate-in-session:async
-       session uuid OrgBabelEval-call block output-file
+       backend session uuid OrgBabelEval-call block output-file
        (list params output-file org-buffer))
     (ob-julia-dispatch-output-type
      params
@@ -554,27 +596,26 @@ PARAMS are the parameter passed to the block"
   ;; TODO: if the block already has a julia-async link, it would be
   ;; nice to interrupt it and start the new one.
   (save-excursion
-    (let* ((org-buffer (current-buffer))
+    (let* ((backend (or backend org-babel-julia-backend))
+           (org-buffer (current-buffer))
            (session (org-babel-julia-get-session-name params))
            (body (org-babel-expand-body:julia block params))
            (src-file (make-temp-file "ob-julia-" nil ".jl" body))
-           (out-format (or (org-babel-julia-parse-result-format params)
+           (out-format (or (org-babel-julia-parse-output-extension params)
                            (bound-and-true-p org-export-current-backend)))
            (uuid (and (org-babel-julia-async-p params) (org-id-uuid)))
            (output-file
             (org-babel-julia-output-file (alist-get :file params) out-format))
            (OrgBabelEval-call
             (org-babel-julia-prepare-format-call
+             (or backend org-babel-julia-backend)
              src-file output-file params uuid)))
       (if session
           (org-babel-julia-evaluate-in-session
            backend session block
            OrgBabelEval-call uuid params output-file org-buffer)
         (org-babel-julia-evaluate-external-process
-         OrgBabelEval-call uuid params output-file org-buffer))))
-  
-  (org-babel-julia-execute (or backend org-babel-julia-backend)
-                           block params))
+         OrgBabelEval-call uuid params output-file org-buffer)))))
 
 (provide 'ob-julia)
 ;;; ob-julia.el ends here
