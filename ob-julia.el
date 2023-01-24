@@ -66,6 +66,11 @@ automatically."
   "When non-nil, add advice on loading to make latex environment results raw.
 `org-babel-insert-result' will be advised by `ob-julia-latexify-make-raw'.")
 
+(defcustom org-babel-julia-after-async-execute-hook nil
+  "Hook run after async execution of Julia babel blocks."
+  :group 'org-babel-julia
+  :type 'hook)
+
 (defconst org-babel-header-args:julia
   '((width		 . :any)
     (height		 . :any)
@@ -463,7 +468,8 @@ source block."
       	  ;; insert new one
           (org-babel-insert-result
            (ob-julia-dispatch-output-type params output-file t)
-           (alist-get :result-params params) nil nil "julia"))))))
+           (alist-get :result-params params) nil nil "julia")
+          (run-hooks 'org-babel-julia-after-async-execute-hook))))))
 
 ;; ** Functions involving the backend: filtering output, sending input etc
 
