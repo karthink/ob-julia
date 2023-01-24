@@ -15,10 +15,19 @@
 ;; This package adds Julia support to Org Mode src block evaluation
 ;;; Code:
 
-;; Required packages:
+;; ** Required packages:
 (require 'ob)
-(require 'ess)
-(require 'ess-julia)
+(require 'cl-generic)
+
+;; ** User options
+(defgroup org-babel-julia nil
+  "Org babel support for Julia."
+  :group 'org-babel
+  :version "24.1")
+
+(defcustom org-babel-julia-backend 'julia-snail "Backend"
+  :group 'org-babel-julia
+  :type 'symbol)
 
 ;; For external eval, we do not rely on ESS:
 (defcustom org-babel-julia-external-command "julia"
@@ -73,6 +82,9 @@ automatically."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Real code starts here ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; ** Functions not involving the backend: argument handling, error display etc
+
 (defun org-babel-julia-params->named-tuple (params)
   "Takes the arguments in PARAMS that needs to be processed by
 Julia, and put them in a NamedTuple() that will be passed to Julia."
@@ -147,12 +159,6 @@ properties PROPERTIES."
 
 (defun ob-julia--trace-file (output-file)
   (concat output-file ".trace"))
-(defun org-julia-async-process-filter-ess (process output)
-  "A function that is called when new output is available on the
-  Julia buffer, which waits until the async execution is
-  completed.  Replace julia-async: tags with async results.
-  This version is specific to ESS."
-  (org-julia-async-process-filter process output t))
 
 (defun ob-julia--has-stacktrace (output-file)
   (file-exists-p (ob-julia--trace-file output-file)))
@@ -173,92 +179,6 @@ properties PROPERTIES."
     (ob-julia-create-stacktrace-buffer
      (ob-julia--trace-file output-file) (when async -1)))
   (org-babel-julia-process-results params output-file))
-
-(defun org-julia-async-process-filter (process output &optional fallback)
-  "A function that is called when new output is available on the
-  Julia buffer, which waits until the async execution is
-  completed.  Replace julia-async: tags with async results."
-  ;; Wait until ob_julia_async_UUID is printed
-  (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" output)
-      ;; Recover the uuid from the julia output
-      (let* ((uuid (match-string-no-properties 1 output))
-             ;; get properties about the block that started the async process
-             (properties (org-babel-julia--async-get-remove uuid))
-             (vals (cdr properties))
-             (params (elt vals 0))
-             (output-file (elt vals 1))
-             (org-buffer (elt vals 2)))
-        ;; In the meanwhile, the user can change point and buffer, we
-        ;; need to jump to where we started without disturbing.
-        (save-window-excursion
-          (switch-to-buffer org-buffer)
-          (save-excursion
-            (save-restriction
-      	      ;; If it's narrowed, substitution would fail
-      	      (widen)
-      	      ;; search the matching src block
-      	      (goto-char (point-max))
-      	      (when (search-backward (concat "julia-async:" uuid) nil t)
-      	        ;; remove results
-      	        (search-backward "#+end_src")
-      	        ;; insert new one
-      	        (org-babel-insert-result
-                 (ob-julia-dispatch-output-type params output-file t)
-                 (alist-get :result-params params) nil nil "julia")
-                ;; Pop up the stacktrace buffer if needed
-                (when (ob-julia--has-stacktrace output-file)
-                  (pop-to-buffer (ob-julia--get-create-trace-buffer)))))))
-        (when fallback
-          (inferior-ess-output-filter process "\n")))
-    (when fallback
-      (inferior-ess-output-filter process output))))
-
-(defun org-babel-julia-evaluate-external-process:async (cmd uuid properties)
-  "Run CMD in a separate process.  The output buffer will be
-*ob-julia-async-process*, with an async filter registered on it.
-The block PROPERTIES will be stored with uuid UUID."
-  (make-process :name "*ob-julia-async-process*"
-        	:filter #'org-julia-async-process-filter
-        	:command cmd)
-  (org-babel-julia--async-add uuid properties))
-
-(defun org-babel-julia-evaluate-external-process:sync (cmd buf)
-  "Evaluate CMD synchronously, storing stderr in BUF."
-  ;; We use the same cmd for both make-process and shell-command, here
-  ;; we escape the parts.
-  (shell-command (mapconcat (lambda (c) (format "%S" c)) cmd " ") nil buf))
-
-(defun org-babel-julia-evaluate-external-process
-    (org-babel-eval-call async params output-file org-buffer)
-  "Evaluate ORG_BABEL_EVAL_CALL in an external Julia process.
-If the shell-command returns an error, show it in a stacktrace buffer.
-Depending on ASYNC the appropriate evaluation is choosen.
-ORG_BUFFER stores the provenance of the execution (required for
-async evaluation)."
-  ;; We write shell-command output to a trace-buffer so that we are
-  ;; able to capture internal ob-julia errors
-  (let ((buf (ob-julia--make-trace-buffer -1))
-        (cmd
-         `(,org-babel-julia-external-command
-           ,@org-babel-julia-command-arguments
-           "--load" ,ob-julia-startup-script
-           "--eval" ,org-babel-eval-call)))
-    (if async
-        (org-babel-julia-evaluate-external-process:async
-         cmd async (list params output-file org-buffer))
-      (with-current-buffer buf
-        (read-only-mode -1)
-        (insert "If you can read me, there might be a bug in ob-julia!
-Please submit a bug report!")
-        (let ((ret (org-babel-julia-evaluate-external-process:sync cmd buf)))
-          ;; Display the stack trace buffer only if we need to
-          (if (= ret 1)
-              (pop-to-buffer buf)
-            (erase-buffer))
-          (read-only-mode 1))))
-    (if async
-        (concat "julia-async:" async)
-      (ob-julia-dispatch-output-type params output-file))))
 
 (defun org-babel-expand-body:julia (body params)
   "Expand BODY according to PARAMS.  Return the expanded body, a
@@ -494,57 +414,126 @@ If session should not be used, return nil.
     (when name
       (maybe-earmuff-session-name name))))
 
-(defun org-babel-prep-session:julia (session params)
-  "Prepare SESSION according to the header arguments specified in PARAMS."
-  (let ((dir (or (alist-get :dir params)
-		 (inferior-ess--maybe-prompt-startup-directory session "julia")))
-        ;; We manyally ask for starting directory, don't ask twice
-        (ess-ask-for-ess-directory nil))
-    (save-window-excursion
-      (let* ((start-script-arg
-              (concat
-               (mapconcat #'identity org-babel-julia-command-arguments " ")
-               (format " --load=%s" ob-julia-startup-script)))
-             (inferior-julia-args (if inferior-julia-args
-                                      (concat inferior-julia-args " " start-script-arg)
-                                    start-script-arg)))
-        (switch-to-buffer (run-ess-julia)))
-      (rename-buffer
-       (if (bufferp session)
-           (buffer-name session)
-         (if (stringp session)
-             session
-           (buffer-name))))
-      ;; Register the async callback. Important to do this before
-      ;; running any command
-      (set-process-filter
-       (get-buffer-process
-        (org-babel-comint-buffer-livep session))
-       'org-julia-async-process-filter-ess))))
+;; ** Functions involving the backend: filtering output, sending input etc
 
-(defun org-babel-julia-evaluate-in-session:sync (session body block output)
-  "Run FILE, in session SESSION, synchronously."
-  (org-babel-comint-eval-invisibly-and-wait-for-file
-   session output body 0.1)
-  (with-current-buffer session
-    (comint-add-to-input-history block))
-  output)
+(defun org-julia-async-process-filter (process output &optional fallback)
+  "A function that is called when new output is available on the
+  Julia buffer, which waits until the async execution is
+  completed.  Replace julia-async: tags with async results."
+  ;; Wait until ob_julia_async_UUID is printed
+  (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" output)
+      ;; Recover the uuid from the julia output
+      (let* ((uuid (match-string-no-properties 1 output))
+             ;; get properties about the block that started the async process
+             (properties (org-babel-julia--async-get-remove uuid))
+             (vals (cdr properties))
+             (params (elt vals 0))
+             (output-file (elt vals 1))
+             (org-buffer (elt vals 2)))
+        ;; In the meanwhile, the user can change point and buffer, we
+        ;; need to jump to where we started without disturbing.
+        (save-window-excursion
+          (switch-to-buffer org-buffer)
+          (save-excursion
+            (save-restriction
+      	      ;; If it's narrowed, substitution would fail
+      	      (widen)
+      	      ;; search the matching src block
+      	      (goto-char (point-max))
+      	      (when (search-backward (concat "julia-async:" uuid) nil t)
+      	        ;; remove results
+      	        (search-backward "#+end_src")
+      	        ;; insert new one
+      	        (org-babel-insert-result
+                 (ob-julia-dispatch-output-type params output-file t)
+                 (alist-get :result-params params) nil nil "julia")
+                ;; Pop up the stacktrace buffer if needed
+                (when (ob-julia--has-stacktrace output-file)
+                  (pop-to-buffer (ob-julia--get-create-trace-buffer)))))))
+        (when fallback
+          (inferior-ess-output-filter process "\n")))
+    (when fallback
+      (inferior-ess-output-filter process output))))
 
-(defun org-babel-julia-evaluate-in-session:async
-    (session uuid body block output properties)
-  "Run FILE, in session SESSION, synchronously."
-  (process-send-string session (concat body "\n"))
-  (with-current-buffer session
-    (comint-add-to-input-history block))
-  (org-babel-julia--async-add uuid properties)
-  (concat "julia-async:" uuid))
+(defun org-babel-julia-evaluate-external-process:async (cmd uuid properties)
+  "Run CMD in a separate process.  The output buffer will be
+*ob-julia-async-process*, with an async filter registered on it.
+The block PROPERTIES will be stored with uuid UUID."
+  (make-process :name "*ob-julia-async-process*"
+        	:filter #'org-julia-async-process-filter
+        	:command cmd)
+  (org-babel-julia--async-add uuid properties))
+
+(defun org-babel-julia-evaluate-external-process:sync (cmd buf)
+  "Evaluate CMD synchronously, storing stderr in BUF."
+  ;; We use the same cmd for both make-process and shell-command, here
+  ;; we escape the parts.
+  (shell-command (mapconcat (lambda (c) (format "%S" c)) cmd " ") nil buf))
+
+(defun org-babel-julia-evaluate-external-process
+    (org-babel-eval-call async params output-file org-buffer)
+  "Evaluate ORG_BABEL_EVAL_CALL in an external Julia process.
+If the shell-command returns an error, show it in a stacktrace buffer.
+Depending on ASYNC the appropriate evaluation is choosen.
+ORG_BUFFER stores the provenance of the execution (required for
+async evaluation)."
+  ;; We write shell-command output to a trace-buffer so that we are
+  ;; able to capture internal ob-julia errors
+  (let ((buf (ob-julia--make-trace-buffer -1))
+        (cmd
+         `(,org-babel-julia-external-command
+           ,@org-babel-julia-command-arguments
+           "--load" ,ob-julia-startup-script
+           "--eval" ,org-babel-eval-call)))
+    (if async
+        (org-babel-julia-evaluate-external-process:async
+         cmd async (list params output-file org-buffer))
+      (with-current-buffer buf
+        (read-only-mode -1)
+        (insert "If you can read me, there might be a bug in ob-julia!
+Please submit a bug report!")
+        (let ((ret (org-babel-julia-evaluate-external-process:sync cmd buf)))
+          ;; Display the stack trace buffer only if we need to
+          (if (= ret 1)
+              (pop-to-buffer buf)
+            (erase-buffer))
+          (read-only-mode 1))))
+    (if async
+        (concat "julia-async:" async)
+      (ob-julia-dispatch-output-type params output-file))))
+
+(defun org-babel-prep-session:julia (session params &optional backend)
+  "Prepare SESSION according to the header arguments specified in PARAMS.
+
+Dispatch on the value of BACKEND or `org-babel-julia-backend'."
+  (org-babel-julia-prep-session (or backend org-babel-julia-backend)
+                           block params))
+
+(cl-defgeneric org-babel-julia-session-live-p (session)
+  nil)
+
+(cl-defgeneric org-babel-julia-prep-session (backend session params) nil)
+
+(cl-defgeneric org-babel-julia-evaluate-in-session:sync
+    (backend session body block output)
+  "Run BODY in session SESSION synchronously.
+
+Dispatch on BACKEND or `org-babel-julia-backend'."
+  nil)
+
+(cl-defgeneric org-babel-julia-evaluate-in-session:async
+    (backend session uuid body block output properties)
+  "Run BODY in session SESSION asynchronously.
+
+Dispatch on BACKEND or `org-babel-julia-backend'."
+  nil)
 
 (defun org-babel-julia-evaluate-in-session
-    (session block OrgBabelEval-call uuid params output-file org-buffer)
+  (session block OrgBabelEval-call uuid params output-file org-buffer)
   "Evaluate BLOCK in session SESSION, starting it if necessary.
 If UUID is provided, run the block asynchronously."
   ;; If the session does not exists, start it
-  (when (not (org-babel-comint-buffer-livep session))
+  (when (not (org-babel-julia-session-live-p session))
     (org-babel-prep-session:julia session params))
   (if uuid
       (org-babel-julia-evaluate-in-session:async
@@ -556,9 +545,9 @@ If UUID is provided, run the block asynchronously."
       session OrgBabelEval-call block output-file))))
 
 ;; Main entry point when code is evaluated in an Org Mode buffer
-(defun org-babel-execute:julia (block params)
-  "Execute a block of julia code.
-This function is called by `org-babel-execute-src-block'.
+(defun org-babel-execute:julia (block params &optional backend)
+  "Execute a block of julia code using the ESS Julia backend.
+
 BLOCK is the content of the src block
 PARAMS are the parameter passed to the block"
   ;; Save excursion as we might open new buffers (e.g. stacktrace)
@@ -579,10 +568,17 @@ PARAMS are the parameter passed to the block"
              src-file output-file params uuid)))
       (if session
           (org-babel-julia-evaluate-in-session
-           session block
+           backend session block
            OrgBabelEval-call uuid params output-file org-buffer)
         (org-babel-julia-evaluate-external-process
-         OrgBabelEval-call uuid params output-file org-buffer)))))
+         OrgBabelEval-call uuid params output-file org-buffer))))
+  
+  (org-babel-julia-execute (or backend org-babel-julia-backend)
+                           block params))
 
 (provide 'ob-julia)
 ;;; ob-julia.el ends here
+
+;; Local Variables:
+;; outline-regexp: "^;; [*]+"
+;; End:
