@@ -612,7 +612,12 @@ PARAMS are the parameter passed to the block"
                            (bound-and-true-p org-export-current-backend)))
            (uuid (and (org-babel-julia-async-p params) (org-id-uuid)))
            (output-file
-            (org-babel-julia-output-file (alist-get :file params) out-format))
+            (org-babel-julia-output-file
+             (unless (cl-intersection '("link" "graphics")
+                                      (alist-get :result-params params)
+                                      :test #'equal)
+               (alist-get :file params))
+             out-format))
            (OrgBabelEval-call
             (org-babel-julia-prepare-format-call
              (or backend org-babel-julia-backend)
