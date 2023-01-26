@@ -41,10 +41,16 @@ the startup script."
        ((buffer-local-value 'julia-snail-repl-mode repl-buffer)))))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:sync
-  ((_ (eql 'julia-snail)) session body block output)
-  "Run BODY in session SESSION synchronously with julia-snail."
-  ;; TODO
-  )
+  ((_ (eql 'julia-snail)) session OrgBabelEval-call _ output-file params)
+  "Run ORGBABELEVAL-CALL in session SESSION synchronously with julia-snail."
+  (julia-snail--send-to-server
+    '("Main")
+    OrgBabelEval-call
+    :async nil
+    :display-error-buffer-on-failure? t)
+  (if (file-exists-p output-file)
+      output-file
+    (error "No output produced.")))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:async
   ((_ (eql 'julia-snail)) session uuid body block output properties)

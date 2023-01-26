@@ -590,7 +590,7 @@ If UUID is provided, run the block asynchronously."
     (ob-julia-dispatch-output-type
      params
      (org-babel-julia-evaluate-in-session:sync
-      session OrgBabelEval-call block output-file))))
+      backend session OrgBabelEval-call block output-file params))))
 
 ;; Main entry point when code is evaluated in an Org Mode buffer
 (defun org-babel-execute:julia (block params &optional backend)
