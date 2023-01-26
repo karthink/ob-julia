@@ -230,10 +230,11 @@ properties PROPERTIES."
   non-existing path (when :output-dir is a non-existing
   directory).
   If EXTENSION is not nil, use it as file extension."
-  (or file
-      (org-babel-process-file-name
-       (org-babel-temp-file
-        "julia-" (if extension (concat "." extension) nil)))))
+  (if file
+      (expand-file-name file)
+    (org-babel-process-file-name
+     (org-babel-temp-file
+      "julia-" (if extension (concat "." extension) nil)))))
 
 (defun org-babel-julia-process-value-result (results type)
   "Insert hline if needed (combining info from RESULT and TYPE."
