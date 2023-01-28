@@ -80,7 +80,7 @@ function org_eval(src, output_stream, dir=pwd(), catch_errors=true) #, mime=MIME
             redirect_stdout(output_stream) do
                 redirect_stderr(output_stream) do
                     try
-                        (true, Base.include(Main, src))
+                        (true, Base.include_string(Main, read(src, String)))
                     catch e
                         # There's an evaluation error, store it both
                         # as output and return as result
