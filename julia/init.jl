@@ -61,13 +61,16 @@ function drop_useless_trace(trace)
     trace[idx:end]
 end
 
-"""Safely evaluate `code'.  Store stdout and stderr to `output_stream'
-and return a tuple with the outcome of the evaluation and its result.
-If an exception is thrown, the outcome is false and the trace is
-returned.  Directory during evaluation is chanded `dir', which
-defaults to the current directory.  The output will be printed to a
-display with mime type `mime'."""
-function org_eval(src, output_stream, dir=pwd()) #, mime=MIMES[""])
+"""Evaluate code in input file `src`. Store stdout and stderr to
+`output_stream` and return a tuple with the outcome of the evaluation
+and its result. The boolean `catch_errors` determines if errors should
+be safely handled and the stacktrace returned, in which case the
+outcome is false. Directory during evaluation is chanded `dir`, which
+defaults to the current directory.
+
+TODO: The output will be printed to a display with mime type
+`mime`."""
+function org_eval(src, output_stream, dir=pwd(), catch_errors=true) #, mime=MIMES[""])
     # Meta.parse parses only one expression, so we wrap the code in a
     # block.  It can either be a let block or a begin block.
     return cd(expanduser(dir)) do
@@ -84,7 +87,11 @@ function org_eval(src, output_stream, dir=pwd()) #, mime=MIMES[""])
                         errbuf = IOBuffer()
                         showerror(errbuf, e)
                         err = String(take!(errbuf))
-                        (false, [err, drop_useless_trace(stacktrace())...])
+                        if catch_errors # Handle errors with ObJulia
+                            (false, [err, drop_useless_trace(stacktrace())...])
+                        else
+                            rethrow()
+                        end
                     finally
                         popdisplay()
                     end
@@ -128,16 +135,20 @@ function auto_determine_mime(result)
     end
 end
 
-"""ob-julia entry point.  Run the code contained in `src-file`,
-wrapped in a block where variables defined in `vars-file` are set.
-The output is written to `output_file`, according to config
-options defined in `params`.
+"""ob-julia entry point. Run the code contained in `src-file`. The
+output is written to `output_file`, according to config options
+defined in `params`.
 
-If `print_output` is true (default), print the `async_uuid` instead of returning
-it. If `automime` is true, change the extension of the `output_file`
+If `catch_errors` is true (default), exceptions are handled by
+ObJulia and the trace is included in a separate trace file.
+
+If `print_output` is true (default), print the `async_uuid` instead of
+returning it.
+
+If `automime` is true, change the extension of the `output_file`
 heuristically to a better suited one."""
 function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
-                      print_output=true, automime=false)
+                      print_output=true, automime=false, catch_errors=true)
     "Return a temporary file in the same dir as `output`.
      Create the dir if it does not exists."
     function safe_mktemp(output)
@@ -159,7 +170,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
     if result_is_output(params)
         println(temporary_stream, "raw")
     end
-    success, result = org_eval(src_file, temporary_stream, working_dir(params))
+    success, result = org_eval(src_file, temporary_stream, working_dir(params), catch_errors)
     # Now the code has been executed and imports have been imported.
     # We can reload supported display function so maybe one of them will be used
     OrgBabelReload()

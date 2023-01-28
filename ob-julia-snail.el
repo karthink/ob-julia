@@ -9,7 +9,7 @@ OrgBabelEval is the entry point of the Julia code defined in
 the startup script."
   (format
    ;; "Main.JuilaSnail.Extensions.ObJulia.OrgBabelEval(%S,%S,%S,%s;print_output=false);"
-   "ObJulia.OrgBabelEval(%S,%S,%S,%s;print_output=false);"
+   "ObJulia.OrgBabelEval(%S,%S,%S,%s;print_output=false,catch_errors=false);"
    src-file out-file (org-babel-julia-params->named-tuple params)
    (or (when uuid (format "%S" uuid)) "nothing")))
 
