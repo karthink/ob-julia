@@ -469,7 +469,9 @@ source block."
       	  ;; insert new one
           (org-babel-insert-result
            (ob-julia-dispatch-output-type params output-file t)
-           (alist-get :result-params params) nil nil "julia")
+           (alist-get :result-params params)
+           (list nil nil params)
+           nil "julia")
           (run-hooks 'org-babel-julia-after-async-execute-hook))))))
 
 ;; ** Functions involving the backend: filtering output, sending input etc
