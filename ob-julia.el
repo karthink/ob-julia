@@ -512,7 +512,7 @@ The block PROPERTIES will be stored with uuid UUID."
   (shell-command (mapconcat (lambda (c) (format "%S" c)) cmd " ") nil buf))
 
 (defun org-babel-julia-evaluate-external-process
-    (org-babel-eval-call async params output-file org-buffer)
+    (org-babel-eval-call async params output-file org-buffer src-file)
   "Evaluate ORG_BABEL_EVAL_CALL in an external Julia process.
 If the shell-command returns an error, show it in a stacktrace buffer.
 Depending on ASYNC the appropriate evaluation is choosen.
@@ -541,7 +541,9 @@ Please submit a bug report!")
           (read-only-mode 1))))
     (if async
         (concat "julia-async:" async)
-      (ob-julia-dispatch-output-type params output-file))))
+      (ob-julia-dispatch-output-type params output-file)
+      (when (and src-file (file-exists-p src-file))
+        (delete-file src-file)))))
 
 (defun org-babel-julia-initiate-session (session params &optional backend)
   "If there is not a current julia process then create one."
@@ -578,7 +580,7 @@ Dispatch on BACKEND or `org-babel-julia-backend'."
   nil)
 
 (defun org-babel-julia-evaluate-in-session
-  (backend session block OrgBabelEval-call uuid params output-file org-buffer)
+  (backend session block OrgBabelEval-call uuid params output-file org-buffer src-file)
   "Evaluate BLOCK in session SESSION, starting it if necessary.
 If UUID is provided, run the block asynchronously."
   ;; If the session does not exists, start it
@@ -587,11 +589,14 @@ If UUID is provided, run the block asynchronously."
   (if uuid
       (org-babel-julia-evaluate-in-session:async
        backend session uuid OrgBabelEval-call block output-file
-       (list params output-file org-buffer))
-    (ob-julia-dispatch-output-type
-     params
-     (org-babel-julia-evaluate-in-session:sync
-      backend session OrgBabelEval-call block output-file params))))
+       (list params output-file org-buffer src-file))
+    (unwind-protect
+        (ob-julia-dispatch-output-type
+         params
+         (org-babel-julia-evaluate-in-session:sync
+          backend session OrgBabelEval-call block output-file params))
+      (when (and src-file (file-exists-p src-file))
+        (delete-file src-file)))))
 
 ;; Main entry point when code is evaluated in an Org Mode buffer
 (defun org-babel-execute:julia (block params &optional backend)
@@ -625,9 +630,9 @@ PARAMS are the parameter passed to the block"
       (if session
           (org-babel-julia-evaluate-in-session
            backend session block
-           OrgBabelEval-call uuid params output-file org-buffer)
+           OrgBabelEval-call uuid params output-file org-buffer src-file)
         (org-babel-julia-evaluate-external-process
-         OrgBabelEval-call uuid params output-file org-buffer)))))
+         OrgBabelEval-call uuid params output-file org-buffer src-file)))))
 
 (provide 'ob-julia)
 ;;; ob-julia.el ends here

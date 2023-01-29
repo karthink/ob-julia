@@ -42,13 +42,13 @@
   (org-babel-comint-buffer-livep session))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:sync
-  ((_ (eql 'ess-julia)) session body block output)
+  ((_ (eql 'ess-julia)) session body block output-file _)
   "Run BODY in session SESSION synchronously with ess-julia."
   (org-babel-comint-eval-invisibly-and-wait-for-file
-   session output body 0.1)
+   session output-file body 0.1)
   (with-current-buffer session
     (comint-add-to-input-history block))
-  output)
+  output-file)
 
 (cl-defmethod org-babel-julia-evaluate-in-session:async
     (backend session uuid body block output properties)

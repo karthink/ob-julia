@@ -53,12 +53,12 @@ the startup script."
     (error "No output produced.")))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:async
-  ((_ (eql 'julia-snail)) session uuid body block output properties)
-  "Run BODY in session SESSION asynchronously with julia-snail."
+  ((_ (eql 'julia-snail)) session uuid OrgBabelEval-call _ output properties)
+  "Run ORGBABELEVAL-CALL in session SESSION asynchronously with julia-snail."
   (let ((reqid 
          (julia-snail--send-to-server
            '("Main") ;TODO: Use `julia-snail--module-at-point'
-           body
+           OrgBabelEval-call
            :async t
            :display-error-buffer-on-failure? t
            :callback-success #'org-babel-julia-snail-success-callback))))
@@ -75,19 +75,24 @@ the startup script."
                                 request-info))
                (properties (org-babel-julia--async-get-remove uuid))
                (vals (cdr properties))
-               ;; (org-buffer (elt vals 2))
                (params (elt vals 0))
-               (output-file (elt vals 1)))
-          ;; ObJulia can pick a mime-type better suited to the type of result
-          ;; generated - for instance, png when writing a GR plot object. We
-          ;; rename the output file to a more suitable extension in this case.
-          (when-let* ((required-ext (alist-get mime-type org-babel-julia-mimes->exts
-                                               nil nil #'equal))
-                      (new-output-file (concat (file-name-sans-extension output-file)
-                                               "." required-ext)))
-            (unless (string= (file-name-extension output-file) required-ext)
-              (rename-file output-file new-output-file)
-              (setq output-file new-output-file)))
-          (org-babel-julia--place-result output-file org-buffer uuid params)))))
+               (output-file (elt vals 1))
+               ;; (org-buffer (elt vals 2))
+               (src-file (elt vals 3)))
+          (unwind-protect
+              (progn
+                ;; ObJulia can pick a mime-type better suited to the type of result
+                ;; generated - for instance, png when writing a GR plot object. We
+                ;; rename the output file to a more suitable extension in this case.
+                (when-let* ((required-ext (alist-get mime-type org-babel-julia-mimes->exts
+                                                     nil nil #'equal))
+                            (new-output-file (concat (file-name-sans-extension output-file)
+                                                     "." required-ext)))
+                  (unless (string= (file-name-extension output-file) required-ext)
+                    (rename-file output-file new-output-file)
+                    (setq output-file new-output-file)))
+                (org-babel-julia--place-result output-file org-buffer uuid params))
+            (when (and src-file (file-exists-p src-file))
+              (delete-file src-file)))))))
 
 (provide 'ob-julia-snail)
