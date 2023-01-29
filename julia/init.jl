@@ -101,6 +101,14 @@ function org_eval(src, output_stream, dir=pwd(), catch_errors=true) #, mime=MIME
     end
 end
 
+"""Determine the output MIME type based on filename. Fallback to `fallback`."""
+function output_mime(filename; fallback="")
+    # ext might either be an empty string or an extension with a "."
+    # prefix
+    ext = splitext(filename)[end]
+    get(MIMES, isempty(ext) ? fallback : ext[2:end], MIMES[fallback])
+end
+
 """Determine the output MIME type based on file contents or filename. Fallback
 to `fallback`."""
 function output_mime(filename, result; fallback="")
@@ -181,6 +189,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
         write(trace_file, join(result, "\n"))
     end
     if result_is_output(params)
+        mime = output_mime(output_file)
         # Data has already been written to temporary_stream, close it
         # and move the file
         close(temporary_stream)
@@ -188,6 +197,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
         # replace the output file with the file in which we wrote our results
         mv(temporary_output, output_file, force=true)
     elseif result_is_raw(params)
+        mime = output_mime(output_file)
         write(output_file, string("raw\n", result))
     else
         # We need to write the output results to the output file
