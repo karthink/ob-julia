@@ -567,11 +567,10 @@ Please submit a bug report!")
 
 (defun org-babel-julia-initiate-session (session params &optional backend)
   "If there is not a current julia process then create one."
-  (if (org-babel-julia-session-live-p session)
-      session
-    (unless (string= session "none")
-      (org-babel-julia-prep-session (or backend org-babel-julia-backend)
-                                    session params))))
+  (or (org-babel-julia--get-live-session session)
+      (unless (equal session "none")
+        (org-babel-julia-prep-session (or backend org-babel-julia-backend)
+                                      session params))))
 
 (defun org-babel-prep-session:julia (session params &optional backend)
   "Prepare SESSION according to the header arguments specified in PARAMS.
@@ -580,7 +579,7 @@ Dispatch on the value of BACKEND or `org-babel-julia-backend'."
   (org-babel-julia-prep-session (or backend org-babel-julia-backend)
                            session params))
 
-(cl-defgeneric org-babel-julia-session-live-p (session)
+(cl-defgeneric org-babel-julia--get-live-session (session)
   nil)
 
 (cl-defgeneric org-babel-julia-prep-session (backend session params) nil)
@@ -604,7 +603,7 @@ Dispatch on BACKEND or `org-babel-julia-backend'."
   "Evaluate BLOCK in session SESSION, starting it if necessary.
 If UUID is provided, run the block asynchronously."
   ;; If the session does not exists, start it
-  (when (not (org-babel-julia-session-live-p session))
+  (when (not (org-babel-julia--get-live-session session))
     (org-babel-prep-session:julia session params))
   (if uuid
       (org-babel-julia-evaluate-in-session:async

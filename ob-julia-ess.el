@@ -2,6 +2,10 @@
 (require 'ess)
 (require 'ess-julia)
 
+(cl-defmethod org-babel-julia--get-live-session
+  (session &context (org-babel-julia-backend (eql 'ess-julia)))
+  (org-babel-comint-buffer-livep session))
+
 (defun org-julia-ess-async-process-filter (process output)
   "A function that is called when new output is available on the
   Julia buffer, which waits until the async execution is
@@ -24,20 +28,23 @@
                                       (concat inferior-julia-args " " start-script-arg)
                                     start-script-arg)))
         (switch-to-buffer (run-ess-julia)))
-      (rename-buffer
-       (if (bufferp session)
-           (buffer-name session)
-         (if (stringp session)
-             session
-           (buffer-name))))
+      (setq session
+            (or session
+                (rename-buffer
+                 (if (bufferp session)
+                     (buffer-name session)
+                   (if (stringp session)
+                       session
+                     (buffer-name))))))
       ;; Register the async callback. Important to do this before
       ;; running any command
       (set-process-filter
        (get-buffer-process
         (org-babel-comint-buffer-livep session))
-       'org-julia-ess-async-process-filter))))
+       'org-julia-ess-async-process-filter)
+      (get-buffer session))))
 
-(cl-defmethod org-babel-julia-session-live-p
+(cl-defmethod org-babel-julia--get-live-session
   (session &context (org-babel-julia-backend (eql 'ess-julia)))
   (org-babel-comint-buffer-livep session))
 

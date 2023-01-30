@@ -17,28 +17,28 @@ the startup script."
   "Prepare SESSION according to the header arguments specified in PARAMS."
   (let ((dir (or (alist-get :dir params)
 		 default-directory))
-        (julia-snail-repl-buffer
-         (cond ((bufferp session) (buffer-name session))
-               ((stringp session) session)
-               (t (buffer-name)))))
+        (repl-buffer
+         (org-babel-julia-get-session-name params)))
     (save-window-excursion
+      (setq-local julia-snail-repl-buffer repl-buffer)
       (julia-snail)
       (message "Loading ObJulia...")
       (julia-snail--send-to-server
         ;; '("JuliaSnail" "Extensions")
         '("Main")
         (format "include(\"%s\")" ob-julia-startup-script)
-        :repl-buf julia-snail-repl-buffer
+        :repl-buf repl-buffer
         :async nil)
       (message "Loading ObJulia... done")
       julia-snail-repl-buffer)))
 
-(cl-defmethod org-babel-julia-session-live-p
+(cl-defmethod org-babel-julia--get-live-session
   (session &context (org-babel-julia-backend (eql 'julia-snail)))
   (and-let*
       ((repl-buffer (get-buffer julia-snail-repl-buffer)) 
        ((buffer-live-p repl-buffer))
-       ((buffer-local-value 'julia-snail-repl-mode repl-buffer)))))
+       ((buffer-local-value 'julia-snail-repl-mode repl-buffer)))
+    repl-buffer))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:sync
   ((_ (eql 'julia-snail)) session OrgBabelEval-call _ output-file params)
