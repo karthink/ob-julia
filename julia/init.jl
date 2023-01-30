@@ -196,7 +196,7 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
         # Write the result to the temporary file
         # replace the output file with the file in which we wrote our results
         mv(temporary_output, output_file, force=true)
-    elseif result_is_raw(params)
+    elseif result_is_raw(params) && (latexify == "nil")
         mime = output_mime(output_file)
         write(output_file, string("raw\n", result))
     else

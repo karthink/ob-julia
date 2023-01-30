@@ -62,14 +62,25 @@ automatically."
   :version "24.1"
   :type 'string)
 
-(defcustom ob-julia-insert-latex-environment-advice t
-  "When non-nil, add advice on loading to make latex environment results raw.
-`org-babel-insert-result' will be advised by `ob-julia-latexify-make-raw'.")
-
 (defcustom org-babel-julia-after-async-execute-hook nil
   "Hook run after async execution of Julia babel blocks."
   :group 'org-babel-julia
   :type 'hook)
+
+(defcustom ob-julia-latexify-star-environments t
+  "Insert an asterisk in the environment name of generated LaTeX.
+By default, latexify's outermost environment is usually unstarred, e.g.
+\\begin{environment}. When set, this will insert an asterisk at the end of
+the environment name, i.e. \\begin{environment*}."
+  :type 'boolean
+  :group 'org-babel)
+
+(defcustom org-babel-julia-force-latex-environment t
+  "When using the latexify header argument, change the type of
+LaTeX environment used in the result to `equation'. See also
+`ob-julia-latexify-star-environments'."
+  :type 'boolean
+  :group 'org-babel)
 
 (defconst org-babel-header-args:julia
   '((width		 . :any)
@@ -251,6 +262,9 @@ table. To force a matrix, use matrix"
   (let* ((results (alist-get :results params))
 	 (results (if (stringp results) (split-string results) nil)))
     (cond
+     ((and-let* ((l (alist-get :latexify params))
+                 ((not (equal l "no")))))
+      'raw)
      ((member "table" results) 'table)
      ((member "matrix" results) 'matrix)
      ((member "list" results) 'list)
@@ -298,6 +312,11 @@ table. To force a matrix, use matrix"
                        ;;            (point-min) (point-max)) "\n"))
                        ;; (suggested-type (intern (car content)))
                        ;; (result (mapconcat 'concat (cdr content) "\n"))
+
+                       ;; Handle LaTeX output specially
+                       (result (org-babel-julia--maybe-latexify
+                                result-as-returned))
+
                        ;; Either enforce the result-type requested by the
                        ;; user, or use the one provided by julia if 'auto
                        (result-type (if (eq result-type 'auto)
@@ -321,41 +340,29 @@ table. To force a matrix, use matrix"
         		    :error)
            nil))))))
 
-(defcustom ob-julia-latexify-star-environments t
-  "Insert an asterisk in the environment name of generated LaTeX.
-By default, latexify's outermost environment is usually unstarred, e.g.
-\\begin{environment}. When set, this will insert an asterisk at the end of
-the environment name, i.e. \\begin{environment*}."
-  :type 'boolean
-  :group 'org-babel)
+(defun org-babel-julia--maybe-latexify (result)
+  "Conditionally process latexified result.
 
-(defun ob-julia-latexify-make-raw (orig-fn result &optional result-params info hash lang)
-  (unless (and (stringp result)
-               (string= lang "julia")
-               (let ((latex-env (string-match-p "\\`\\\\begin" result))
-                     (latex-disp (string-match-p "\\`\\$\\$[^\u0000]+\\$\\$\\'" result))
-                     (latex-inline (string-match-p "\\`\\$[^\u0000]+\\$\\'" result)))
-                 (when (or latex-env latex-disp latex-inline)
-                   (if (or latex-disp latex-inline)
-                       (setf result (replace-regexp-in-string "\\`\\$\\$?\\([^\u0000]+\\)\\$\\$?\\'"
-                                                              "\\\\begin{equation*}\n\\1\n\\\\end{equation*}"
-                                                              result))
-                     (when ob-julia-latexify-star-environments
-                       (setf result (replace-regexp-in-string
-                                     "\\`\\\\begin{\\([a-z]+\\)}\\([^\u0000]+\\)\\\\end{[a-z]+}\n\\'"
-                                     "\\\\begin{\\1*}\\2\\\\end{\\1*}\n"
-                                     result))))
-                   (funcall orig-fn result (append result-params '("raw")) info hash lang)
-                   (when (bound-and-true-p org-fragtog-mode)
-                     (save-excursion
-                       (goto-char (org-babel-where-is-src-block-result nil info))
-                       (forward-line 1)
-                       (org-latex-preview)))
-                   t)))
-    (funcall orig-fn result result-params info hash lang)))
-
-;; (when ob-julia-insert-latex-environment-advice
-;;   (advice-add 'org-babel-insert-result :around #'ob-julia-latexify-make-raw))
+The LaTeX environment is changed depending on the values of the
+variables `org-babel-julia-force-latex-environment' and
+`ob-julia-latexify-star-environments'."
+  (if  (and org-babel-julia-force-latex-environment
+            (stringp result))
+      (cond
+       ((or (string-match-p "\\`\\$\\$[^\u0000]+\\$\\$\\'" result)
+            (string-match-p "\\`\\$[^\u0000]+\\$\\'" result))
+        (setf result (replace-regexp-in-string
+                      "\\`\\$\\$?\\([^\u0000]+\\)\\$\\$?\\'"
+                      "\\\\begin{equation*}\n\\1\n\\\\end{equation*}"
+                      result)))
+       ((and ob-julia-latexify-star-environments
+             (string-match-p "\\`\\\\begin" result))
+        (setf result (replace-regexp-in-string
+                      "\\`\\\\begin{\\([a-z]+\\)}\\([^\u0000]+\\)\\\\end{[a-z]+}\n\\'"
+                      "\\\\begin{\\1*}\\2\\\\end{\\1*}\n"
+                      result)))
+       (t result)))
+  result)
 
 (defun org-babel-julia-assign-to-var (name value)
   "Assign VALUE to a variable called NAME."
@@ -611,6 +618,17 @@ If UUID is provided, run the block asynchronously."
       (when (and src-file (file-exists-p src-file))
         (delete-file src-file)))))
 
+(defun org-babel-julia--maybe-make-raw (params)
+  "Conditionally change the result type to \"raw\" if the \"latexify\"
+header argument is present.
+
+Note: PARAMS is modified in the process."
+  (when-let* ((latexify (alist-get :latexify params))
+              ((not (equal latexify "no"))))
+    (message "LaTeX output requested, ignoring result type!")
+    (cl-callf (lambda (v) (nconc v '("raw")))
+        (alist-get :result-params params))))
+
 ;; Main entry point when code is evaluated in an Org Mode buffer
 (defun org-babel-execute:julia (block params &optional backend)
   "Execute a block of julia code using the ESS Julia backend.
@@ -640,6 +658,9 @@ PARAMS are the parameter passed to the block"
             (org-babel-julia-prepare-format-call
              (or backend org-babel-julia-backend)
              src-file output-file params uuid)))
+      ;; Modify params in place as specified by header-args:
+      (org-babel-julia--maybe-make-raw params) ; Handle latexify header arg
+      ;; Evaluate block
       (if session
           (org-babel-julia-evaluate-in-session
            backend session block
