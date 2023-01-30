@@ -285,11 +285,19 @@ table. To force a matrix, use matrix"
                     (push "file" (alist-get :result-params params)))
                 ;; Else format result for display
                 (delete-file output-file)
-                (let* ((content (split-string
-                                 (buffer-substring-no-properties
-                                  (point-min) (point-max)) "\n"))
-                       (suggested-type (intern (car content)))
-                       (result (mapconcat 'concat (cdr content) "\n"))
+                (goto-char (point-min))
+                (let* ((suggested-type (buffer-substring-no-properties
+                                        (point) (line-end-position)))
+                       (result-as-returned
+                        (buffer-substring-no-properties
+                         (progn (forward-line 1) (point))
+                         (point-max)))
+                       ;; ;TODO: Is there any edge case this older version handles?
+                       ;; (content (split-string
+                       ;;           (buffer-substring-no-properties
+                       ;;            (point-min) (point-max)) "\n"))
+                       ;; (suggested-type (intern (car content)))
+                       ;; (result (mapconcat 'concat (cdr content) "\n"))
                        ;; Either enforce the result-type requested by the
                        ;; user, or use the one provided by julia if 'auto
                        (result-type (if (eq result-type 'auto)
@@ -464,14 +472,17 @@ source block."
       	;; search the matching src block
       	(goto-char (point-max))
       	(when (search-backward (concat "julia-async:" uuid) nil t)
-      	  ;; remove results
+      	  ;; remove uuid string if result-type is raw, as ob-core doesn't do it
+          (when (member "raw" (alist-get :result-params params))
+            (delete-region (match-beginning 0) (match-end 0)))
+          ;; remove results
       	  (search-backward "#+end_src")
-      	  ;; insert new one
+          ;; insert new one
           (org-babel-insert-result
-           (ob-julia-dispatch-output-type params output-file t)
-           (alist-get :result-params params)
-           (list nil nil params)
-           nil "julia")
+           (ob-julia-dispatch-output-type params output-file t)   ;=> result string
+           (alist-get :result-params params)                      ;=> result params
+           (list nil nil params)                                  ;=> block info
+           nil "julia")                                           ;=> hash and lang
           (run-hooks 'org-babel-julia-after-async-execute-hook))))))
 
 ;; ** Functions involving the backend: filtering output, sending input etc
