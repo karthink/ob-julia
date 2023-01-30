@@ -212,13 +212,15 @@ function OrgBabelEval(src_file, output_file, params, async_uuid=nothing;
                           else mime end, result; params...)
         write(output_file, take!(io))
     end
-    if async_uuid !== nothing
+    if async_uuid == nothing
+        if print_output println("$(mime)") end
+        return "$(mime)"
+    else
         if print_output
             println("ob_julia_async_$(async_uuid)")
             println("$(mime)")
-        else
-            return "(\"ob_julia_async_$(async_uuid)\" . \"$(mime)\")"
         end
+        return "(\"ob_julia_async_$(async_uuid)\" . \"$(mime)\")"
     end
 end
 

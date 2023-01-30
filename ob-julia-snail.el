@@ -43,14 +43,17 @@ the startup script."
 (cl-defmethod org-babel-julia-evaluate-in-session:sync
   ((_ (eql 'julia-snail)) session OrgBabelEval-call _ output-file params)
   "Run ORGBABELEVAL-CALL in session SESSION synchronously with julia-snail."
-  (julia-snail--send-to-server
-    '("Main")
-    OrgBabelEval-call
-    :async nil
-    :display-error-buffer-on-failure? t)
-  (if (file-exists-p output-file)
-      output-file
-    (error "No output produced.")))
+  (when-let ((mime-type
+              (julia-snail--send-to-server
+                '("Main")
+                OrgBabelEval-call
+                :async nil
+                :display-error-buffer-on-failure? t)))
+    ;; Rename the output file heuristically by mime-type
+    (setq output-file (org-babel-julia--maybe-rename-output output-file mime-type params))
+    (if (file-exists-p output-file)
+        output-file
+      (error "No output produced."))))
 
 (cl-defmethod org-babel-julia-evaluate-in-session:async
   ((_ (eql 'julia-snail)) session uuid OrgBabelEval-call _ output properties)
@@ -83,19 +86,32 @@ the startup script."
                  (src-file (elt vals 3)))
             (unwind-protect
                 (progn
-                  ;; ObJulia can pick a mime-type better suited to the type of result
-                  ;; generated - for instance, png when writing a GR plot object. We
-                  ;; rename the output file to a more suitable extension in this case.
-                  (when-let* ((required-ext (alist-get mime-type org-babel-julia-mimes->exts
-                                                       nil nil #'equal))
-                              (new-output-file (concat (file-name-sans-extension output-file)
-                                                       "." required-ext)))
-                    (unless (string= (file-name-extension output-file) required-ext)
-                      (rename-file output-file new-output-file)
-                      (setq output-file new-output-file)))
+                  ;; Rename the output file heuristically by mime-type
+                  (setq output-file
+                        (org-babel-julia--maybe-rename-output output-file mime-type params))
                   (org-babel-julia--place-result output-file org-buffer uuid params))
               (when (and src-file (file-exists-p src-file))
                 (delete-file src-file))))))))
+
+(defun org-babel-julia--maybe-rename-output (output-file mime-type params)
+  "Possibly rename OUTPUT-FILE with a more suitable extension.
+
+MIME-TYPE is chosen by ObJulia. PARAMS is the list of block
+parameters.
+ 
+ObJulia can pick a mime-type better suited to the type of result
+generated - for instance, png when writing a GR plot object.
+Unless an output file is explicitly specified with the header arg
+`:file', we rename the output file to a more suitable extension."
+  (if-let* (((not (alist-get :file params)))
+            (required-ext (alist-get mime-type org-babel-julia-mimes->exts
+                                     nil nil #'equal))
+            ((not (string= (file-name-extension output-file) required-ext)))
+            (new-output-file (concat (file-name-sans-extension output-file)
+                                     "." required-ext)))
+      (progn (rename-file output-file new-output-file 'force)
+             new-output-file)
+    output-file))
   (pcase-let ((`(,uuid-string . ,mime-type) (read result-data)))
     (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" uuid-string)
         (let* ((uuid (match-string-no-properties 1 uuid-string))
