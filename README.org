@@ -1,0 +1,48 @@
+#+title: Org Babel support for Julia
+
+(Forked from [[https://github.com/nico202/ob-julia][nico202/ob-julia]])
+
+Julia backend agnostic support for Org mode.  Customize the variable =org-babel-julia-backend= to set a backend.
+
+*** Progress
+
+(=✓=: working, =❌=: not working, =-=: untested)
+|----------------------------+-------------+-----------+------------|
+| *Features*                   | =julia-snail= | =ess-julia= | =julia-repl= |
+|----------------------------+-------------+-----------+------------|
+| async, in session          | ✓          | ❌         |            |
+| async, oneshot             | -           | -         |            |
+| sync, in session           | ✓          | ✓        |            |
+| sync, oneshot              | -           | -         |            |
+| errors through backend     | ✓          | ❌         |            |
+| errors through ObJulia     | ✓          | ✓        |            |
+| auto-view graphics         | ✓          | ❌         |            |
+| completion (capf) support  | -           | ❌         |            |
+| track/run dependent blocks | ❌           | ❌         |            |
+|----------------------------+-------------+-----------+------------|
+| *Header args*                |             |           |            |
+|----------------------------+-------------+-----------+------------|
+| =:wrap=                      | ✓          | ✓        |            |
+| =:file=                      | ✓          | ✓        |            |
+| =:dir=                       | ❌           | ✓        |            |
+| =:let=                       | -           | ✓        |            |
+| =:module=                    | ❌           | ❌         |            |
+| =:latexify=                  | ❌           | ❌         |            |
+| =:file=                      | ✓          | ✓        |            |
+|----------------------------+-------------+-----------+------------|
+| *Result types*               |             |           |            |
+|----------------------------+-------------+-----------+------------|
+| =output=                     | ✓          | ❌         |            |
+| =value=                      | ✓          | ✓        |            |
+| =link=, =graphics=             | ✓          | ✓        |            |
+| =file=                       | ✓          | ✓        |            |
+| =raw=, =list=, =matrix=, =table=   | ✓          | -         |            |
+|----------------------------+-------------+-----------+------------|
+| *Package support*            |             |           |            |
+|----------------------------+-------------+-----------+------------|
+| =Plots=                      | ✓          | ✓        |            |
+| =Gadfly=                     | -           | -         |            |
+| =DataFrames=                 | -           | -         |            |
+| =Makie=                      | ❌           | ❌         |            |
+| =Latexify=                   | ✓          | ✓        |            |
+|----------------------------+-------------+-----------+------------|
