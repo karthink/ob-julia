@@ -27,9 +27,14 @@
   :group 'org-babel
   :version "24.1")
 
-(defcustom org-babel-julia-backend 'julia-snail "Backend"
+(defcustom org-babel-julia-backend 'julia-snail
+  "Choose the Julia backend used with Babel.
+
+Currently there is support for Julia Snail and ESS-Julia."
   :group 'org-babel-julia
-  :type 'symbol)
+  :type '(choice
+          (const :tag "Julia Snail" julia-snail)
+          (const :tag "ESS Julia" ess-julia)))
 
 ;; For external eval, we do not rely on ESS:
 (defcustom org-babel-julia-external-command "julia"
