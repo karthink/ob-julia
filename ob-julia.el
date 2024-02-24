@@ -462,6 +462,8 @@ If session should not be used, return nil.
             ;; FIXME
             name (if id (format ":%s" id) "")
             (if (string= "*" (substring name (- (length name) 1))) "" "*")))
+  ;; TODO: If :session is nil, should we start a session? This is equivalent to
+  ;; starting a session by default in Julia.
   (let* ((session (alist-get :session params))
          (name (cond
                 ((null session) ob-julia-default-session-name)
