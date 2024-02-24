@@ -64,7 +64,9 @@ the startup script."
            OrgBabelEval-call
            :async t
            :display-error-buffer-on-failure? t
-           :callback-success #'org-babel-julia-snail-success-callback))))
+           :callback-success #'org-babel-julia-snail-success-callback
+           ;; Currently never called:
+           :callback-failure #'org-babel-julia-snail-failure-callback))))
   (org-babel-julia--async-add uuid properties)
   (concat "julia-async:" uuid))
 
@@ -112,32 +114,19 @@ Unless an output file is explicitly specified with the header arg
       (progn (rename-file output-file new-output-file 'force)
              new-output-file)
     output-file))
+
+;; NOTE: because we catch errors in ObJulia this is never actually called.
+;;
+;; TODO: Provide an option to not catch errors when using julia-snail?
+;; julia-snail's error reporting is pretty slick.
+;; NOTE: In that event, we can't access the UUID! Need to think more about this.
+(defun org-babel-julia-snail-failure-callback (request-info)
   (pcase-let ((`(,uuid-string . ,mime-type) (read result-data)))
     (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" uuid-string)
         (let* ((uuid (match-string-no-properties 1 uuid-string))
-               (org-buffer (julia-snail--request-tracker-originating-buf request-info))
-               (display-errors (julia-snail--request-tracker-display-error-buffer-on-failure?
-                                request-info))
                (properties (org-babel-julia--async-get-remove uuid))
-               (vals (cdr properties))
-               (params (elt vals 0))
-               (output-file (elt vals 1))
-               ;; (org-buffer (elt vals 2))
                (src-file (elt vals 3)))
-          (unwind-protect
-              (progn
-                ;; ObJulia can pick a mime-type better suited to the type of result
-                ;; generated - for instance, png when writing a GR plot object. We
-                ;; rename the output file to a more suitable extension in this case.
-                (when-let* ((required-ext (alist-get mime-type org-babel-julia-mimes->exts
-                                                     nil nil #'equal))
-                            (new-output-file (concat (file-name-sans-extension output-file)
-                                                     "." required-ext)))
-                  (unless (string= (file-name-extension output-file) required-ext)
-                    (rename-file output-file new-output-file)
-                    (setq output-file new-output-file)))
-                (org-babel-julia--place-result output-file org-buffer uuid params))
-            (when (and src-file (file-exists-p src-file))
-              (delete-file src-file)))))))
+          (when (and src-file (file-exists-p src-file))
+            (delete-file src-file))))))
 
 (provide 'ob-julia-snail)
