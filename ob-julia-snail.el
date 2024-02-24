@@ -1,5 +1,12 @@
 (require 'ob-julia)
-(require 'julia-snail)
+(require 'julia-snail nil t)
+
+(declare-function julia-snail "julia-snail")
+(declare-function julia-snail--send-to-server "julia-snail")
+(defvar julia-snail-repl-buffer)
+(declare-function julia-snail--request-tracker-originating-buf "julia-snail")
+(declare-function julia-snail--request-tracker-display-error-buffer-on-failure? "julia-snail")
+(declare-function julia-snail--request-tracker-tmpfile "julia-snail")
 
 (cl-defmethod org-babel-julia-prepare-format-call
     ((_ (eql 'julia-snail)) src-file out-file params &optional uuid)
@@ -66,9 +73,9 @@ the startup script."
            :display-error-buffer-on-failure? t
            :callback-success #'org-babel-julia-snail-success-callback
            ;; Currently never called:
-           :callback-failure #'org-babel-julia-snail-failure-callback))))
-  (org-babel-julia--async-add uuid properties)
-  (concat "julia-async:" uuid))
+           :callback-failure #'org-babel-julia-snail-failure-callback)))
+    (org-babel-julia--async-add uuid properties)
+    (concat "julia-async:" uuid)))
 
 (defun org-babel-julia-snail-success-callback (request-info result-data)
   "A function that is called when julia-snail response is available."
@@ -121,12 +128,7 @@ Unless an output file is explicitly specified with the header arg
 ;; julia-snail's error reporting is pretty slick.
 ;; NOTE: In that event, we can't access the UUID! Need to think more about this.
 (defun org-babel-julia-snail-failure-callback (request-info)
-  (pcase-let ((`(,uuid-string . ,mime-type) (read result-data)))
-    (if (string-match ".*ob_julia_async_\\([0-9a-z\\-]+\\).*" uuid-string)
-        (let* ((uuid (match-string-no-properties 1 uuid-string))
-               (properties (org-babel-julia--async-get-remove uuid))
-               (src-file (elt vals 3)))
-          (when (and src-file (file-exists-p src-file))
-            (delete-file src-file))))))
+  (when-let ((tmpfile (julia-snail--request-tracker-tmpfile request-info)))
+    (and (file-exists-p tmpfile) (delete-file tmpfile))))
 
 (provide 'ob-julia-snail)
