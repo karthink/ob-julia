@@ -4,6 +4,17 @@
 
 Julia backend agnostic support for Org mode.  Customize the variable =org-babel-julia-backend= to set a backend.
 
+*** Instructions
+
+Install this however you install Emacs pacakges from a git repository (the built-in =package-vc= command, Straight/Elpaca etc).
+
+To use the =julia-snail= backend, for example, run
+
+#+begin_src emacs-lisp
+(require 'ob-julia)
+(require 'ob-julia-snail)
+#+end_src
+
 *** Progress
 
 (=✓=: working, =❌=: not working, =-=: untested)
